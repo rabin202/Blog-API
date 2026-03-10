@@ -1,4 +1,4 @@
-from fastapi import APIRouter,Depends,HTTPException,status
+from fastapi import APIRouter,Depends,HTTPException,status,Query
 from ...database import get_db
 from sqlalchemy.orm import Session
 from ...models import models
@@ -12,27 +12,45 @@ router = APIRouter(
 
 
 @router.get("/myblogs",response_model=list[schemas.BlogOut],status_code=status.HTTP_200_OK)
-def get_my_blogs(db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user)):
-    blogs = db.query(models.Blog).filter(models.Blog.author_id==current_user.id).all()
+def get_my_blogs(db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user), limit : int = Query(5,ge=1,le=10), offset : int =Query(0,ge=0),order : str = Query("DESC")):
+    if order == "ASC":
+        query = db.query(models.Blog).filter(models.Blog.author_id==current_user.id).order_by(models.Blog.created_at.asc())
+    else:
+        query = db.query(models.Blog).filter(models.Blog.author_id==current_user.id).order_by(models.Blog.created_at.desc())
+        
+    blogs = query.offset(offset).limit(limit).all()
     return blogs
 
 
 
 @router.get("/",response_model=list[schemas.BlogOut],status_code=status.HTTP_200_OK)
-def get_blogs(db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user)):
-    blogs = db.query(models.Blog).filter(models.Blog.is_published==True).all()
+def get_blogs(db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user),s : str = Query(None,min_length=1), limit : int = Query(5,ge=1,le=10), offset : int =Query(0,ge=0),order : str = Query("DESC")):
+    print(s)
+    if s:
+        query = db.query(models.Blog).filter(models.Blog.is_published==True,models.Blog.title.contains(s))
+    else:
+        query = db.query(models.Blog).filter(models.Blog.is_published==True )
+    if order == "ASC":
+        db_query = query.order_by(models.Blog.created_at.asc())
+    else:
+        db_query = query.order_by(models.Blog.created_at.desc())
+    blogs = db_query.offset(offset).limit(limit).all()
     return blogs
 
 
 @router.get("/{user_id}",response_model=list[schemas.BlogOut],status_code=status.HTTP_200_OK,tags=["Admin"])
-def get_user_blogs(user_id : int,db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user)):
-    if current_user.id != user_id and current_user.role != "admin":
-        blogs = db.query(models.Blog).filter(models.Blog.author_id==user_id and models.Blog.is_published==True).all()
+def get_user_blogs(user_id : int,db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user), limit : int = Query(5,ge=1,le=10), offset : int =Query(0,ge=0),order : str = Query("DESC")):
+    if order == "ASC":
+        db_query = db.query(models.Blog).order_by(models.Blog.created_at.asc())
     else:
-        blogs = db.query(models.Blog).filter(models.Blog.author_id==user_id).all()
+        db_query = db.query(models.Blog).order_by(models.Blog.created_at.desc())
+
+    
+    if current_user.id != user_id and current_user.role != "admin":
+        blogs = db_query.filter(models.Blog.author_id==user_id and models.Blog.is_published==True).offset(offset).limit(limit).all()
+    else:
+        blogs = db_query.filter(models.Blog.author_id==user_id).offset(offset).limit(limit).all()
     return blogs
-
-
 
 
 

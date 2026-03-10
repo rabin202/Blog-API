@@ -1,4 +1,4 @@
-from fastapi import APIRouter,HTTPException,status,Depends
+from fastapi import APIRouter,HTTPException,status,Depends,Query
 from ...schemas.schemas import UserOut,UserUpdate
 from ...models import models
 from ...database import get_db
@@ -23,9 +23,9 @@ def get_admin(current_user : models.User = Depends(get_current_user)):
 
 
 @router.get("/users",response_model=list[UserOut])
-def get_users(db: Session = Depends(get_db), current_admin : models.User = Depends(get_admin)):
+def get_users(db: Session = Depends(get_db), current_admin : models.User = Depends(get_admin), limit : int = Query(5,ge=1,le=10), offset : int =Query(0,ge=0)):
     print(f"{current_admin.username} accessed all users.")
-    users = db.query(models.User).all()
+    users = db.query(models.User).offset(offset).limit(limit).all()
     return users
 
 
@@ -44,7 +44,6 @@ def update_user(user_id : int, user_updated: UserUpdate ,db : Session = Depends(
     db.commit()
     db.refresh(user)
     return user
-
 
 
 @router.delete("/users/{user_id}",status_code=status.HTTP_200_OK)
