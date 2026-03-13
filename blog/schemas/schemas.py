@@ -1,8 +1,9 @@
 from __future__ import annotations
 from enum import Enum
 
-from pydantic import BaseModel,Field,EmailStr
+from pydantic import BaseModel,Field,EmailStr,ConfigDict
 from datetime import datetime
+from ..models.models import Blog
 from typing import Optional,List
 
 
@@ -28,6 +29,14 @@ class UserOut(User):
     id : int 
     created_at : datetime
     role : UserRole
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserOutPrivate(User):
+    id : int 
+    created_at : datetime
+    role : UserRole
+    image_file : str
 
 class UserUpdate(BaseModel):
     email : Optional[EmailStr] = None
@@ -80,4 +89,14 @@ class CommentOut(Comment):
 
 class CommentUpdate(BaseModel):
     body : Optional[str] = None
+
+
+class PaginationBlogResponse(BaseModel):
+    blogs : list[BlogOut]
+    total : int
+    offset : int
+    limit : int
+    has_more : bool
+
+    model_config = ConfigDict(from_attributes=True)
 

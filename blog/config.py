@@ -17,6 +17,8 @@ class Config():
     ALGORITHM="HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES=5
 
+    MAX_UPLOAD_SIZE_BYTES = 4 * 1024 * 1024
+
 
     DB_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}" 
 

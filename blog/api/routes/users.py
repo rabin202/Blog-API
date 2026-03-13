@@ -1,14 +1,16 @@
-from fastapi import APIRouter,Depends,HTTPException,status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import APIRouter,Depends,HTTPException,status,UploadFile
+from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from ...schemas.schemas import UserIn,UserOut,UserLogin,UserUpdate
+from ...schemas.schemas import UserIn,UserOut,UserLogin,UserUpdate,UserOutPrivate
 from ...models import models
 from ...database import get_db
 from datetime import datetime,timedelta,UTC,timezone
 from pwdlib import PasswordHash
 import jwt
+from ...image_utils import process_profile_image,delete_profile_pic
 from ...config import settings
-
+from PIL import UnidentifiedImageError
+import asyncio
 
 
 router = APIRouter(
@@ -20,7 +22,7 @@ router = APIRouter(
 password_hash = PasswordHash.recommended()
 
 oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/login/",
+    tokenUrl="users/login/",
 )
 
 
@@ -52,7 +54,7 @@ def get_current_user(token : str = Depends(oauth2_scheme), db : Session = Depend
                             detail=f"Sorry Authorization Error")
 
 
-@router.post("/register",response_model=UserOut)
+@router.post("/register",response_model=UserOutPrivate)
 def register_user(user_data : UserIn, db : Session = Depends(get_db)):
     existing_user = db.query(models.User).filter(models.User.email==user_data.email.lower()).first()
     if existing_user:
@@ -67,8 +69,8 @@ def register_user(user_data : UserIn, db : Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login_user(user_data : UserLogin, db : Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(models.User.email==user_data.email.lower()).first()
+def login_user(user_data : OAuth2PasswordRequestForm = Depends(), db : Session = Depends(get_db)):
+    existing_user = db.query(models.User).filter(models.User.email==user_data.username.lower()).first()
     if not existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Invalid Credentials")
@@ -81,11 +83,11 @@ def login_user(user_data : UserLogin, db : Session = Depends(get_db)):
     token = create_access_token(payload)
     return {"access_token":token, "token_type":"Bearer"}
 
-@router.get("/me",response_model=UserOut)
+@router.get("/me",response_model=UserOutPrivate)
 def me(current_user : models.User = Depends(get_current_user)):
     return current_user
 
-@router.patch("/",response_model=UserOut,status_code=status.HTTP_200_OK)
+@router.patch("/",response_model=UserOutPrivate,status_code=status.HTTP_200_OK)
 def update_user( user_updated: UserUpdate ,db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user)):
     user = db.query(models.User).filter(models.User.id==current_user.id).first()
     if not user:
@@ -99,3 +101,35 @@ def update_user( user_updated: UserUpdate ,db : Session = Depends(get_db), curre
     db.commit()
     db.refresh(user)
     return user
+
+@router.patch("/picture",response_model=UserOutPrivate)
+async def upload_profile_picture(file:UploadFile,current_user : models.User = Depends(get_current_user),db : Session = Depends(get_db)):
+    content = await file.read()
+
+    if len(content) > settings.MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"File too large. Maximum size is {settings.MAX_UPLOAD_SIZE_BYTES/ 1024 * 1024}")
+    try: 
+        new_filename = process_profile_image(content)
+    except UnidentifiedImageError as err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid Image File.Please upload valid image(JPEG,PNG,GIF,Webp)") from err
+    old_filename = current_user.image_file
+    current_user.image_file = new_filename
+    db.commit()
+    db.refresh(current_user)
+
+    if old_filename:
+        delete_profile_pic(old_filename)
+    
+    return current_user
+
+@router.delete("/picture",response_model=UserOutPrivate)
+def delete_profile(current_user : models.User = Depends(get_current_user),db:Session = Depends(get_db)):
+    old_pic = current_user.image_file
+    current_user.image_file = "default.jpg"
+    delete_profile_pic(old_pic)
+    db.commit()
+    db.refresh(current_user)
+    return current_user

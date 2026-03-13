@@ -3,6 +3,7 @@ from ...schemas.schemas import UserOut,UserUpdate
 from ...models import models
 from ...database import get_db
 from .users import get_current_user,hash_password
+from ...image_utils import delete_profile_pic
 from sqlalchemy.orm import Session
 
 
@@ -47,12 +48,14 @@ def update_user(user_id : int, user_updated: UserUpdate ,db : Session = Depends(
 
 
 @router.delete("/users/{user_id}",status_code=status.HTTP_200_OK)
-def get_users(user_id : int,db: Session = Depends(get_db), current_admin : models.User = Depends(get_admin)):
+def delete_user(user_id : int,db: Session = Depends(get_db), current_admin : models.User = Depends(get_admin)):
     print(f"{current_admin.username} delete user with id {user_id}.")
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"User Not Found")
+    old_filename = user.image_file
     db.delete(user)
+    delete_profile_pic(old_filename)
     db.commit()
     return True
