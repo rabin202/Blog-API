@@ -1,16 +1,17 @@
 from fastapi import APIRouter,Depends,HTTPException,status,UploadFile
 from fastapi.security import OAuth2PasswordBearer,OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from typing import Annotated
+from sqlalchemy.ext.asyncio import AsyncSession
 from ...schemas.schemas import UserIn,UserOut,UserLogin,UserUpdate,UserOutPrivate
 from ...models import models
 from ...database import get_db
 from datetime import datetime,timedelta,UTC,timezone
 from pwdlib import PasswordHash
+from sqlalchemy import select
 import jwt
 from ...image_utils import process_profile_image,delete_profile_pic
 from ...config import settings
 from PIL import UnidentifiedImageError
-import asyncio
 
 
 router = APIRouter(
@@ -43,11 +44,12 @@ def create_access_token(data:dict)-> str:
 def decode_access_token(token : str):
     return jwt.decode(token,settings.SECRET_KEY,algorithms="HS256")
 
-def get_current_user(token : str = Depends(oauth2_scheme), db : Session = Depends(get_db)):
+async def get_current_user(db : Annotated[AsyncSession,Depends(get_db)],token : str = Depends(oauth2_scheme) ):
     try:
         decoded_jwt = jwt.decode(token,settings.SECRET_KEY,algorithms=["HS256"])
         user_mail = decoded_jwt.get("sub")
-        user = db.query(models.User).filter(models.User.email == user_mail).first()
+        result = await db.execute(select(models.User).where(models.User.email == user_mail))
+        user = result.scalars().first()
         return user
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
@@ -55,22 +57,24 @@ def get_current_user(token : str = Depends(oauth2_scheme), db : Session = Depend
 
 
 @router.post("/register",response_model=UserOutPrivate)
-def register_user(user_data : UserIn, db : Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(models.User.email==user_data.email.lower()).first()
+async def register_user(user_data : UserIn, db : Annotated[AsyncSession,Depends(get_db)]):
+    result =await db.execute(select(models.User).where(models.User.email==user_data.email.lower()))
+    existing_user = result.scalars().first()
     if existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Email is already Used")
     user_data.password = hash_password(user_data.password)
     new_user = models.User(**user_data.model_dump())
     db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    await db.commit()
+    await db.refresh(new_user)
     return new_user
 
 
 @router.post("/login")
-def login_user(user_data : OAuth2PasswordRequestForm = Depends(), db : Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(models.User.email==user_data.username.lower()).first()
+async def login_user(db : Annotated[AsyncSession , Depends(get_db)],user_data : OAuth2PasswordRequestForm = Depends(), ):
+    result = await db.execute(select(models.User).where(models.User.email==user_data.username.lower()))
+    existing_user = result.scalars().first()
     if not existing_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Invalid Credentials")
@@ -84,12 +88,13 @@ def login_user(user_data : OAuth2PasswordRequestForm = Depends(), db : Session =
     return {"access_token":token, "token_type":"Bearer"}
 
 @router.get("/me",response_model=UserOutPrivate)
-def me(current_user : models.User = Depends(get_current_user)):
+async def me(current_user : Annotated[ models.User ,Depends(get_current_user)]):
     return current_user
 
 @router.patch("/",response_model=UserOutPrivate,status_code=status.HTTP_200_OK)
-def update_user( user_updated: UserUpdate ,db : Session = Depends(get_db), current_user : models.User = Depends(get_current_user)):
-    user = db.query(models.User).filter(models.User.id==current_user.id).first()
+async def update_user( user_updated: UserUpdate ,db : Annotated[AsyncSession,Depends(get_db)], current_user : Annotated[ models.User ,Depends(get_current_user)]):
+    user_result = await db.execute(select(models.User).where(models.User.id==current_user.id))
+    user = user_result.scalars().first()
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"No User Found")
@@ -98,12 +103,12 @@ def update_user( user_updated: UserUpdate ,db : Session = Depends(get_db), curre
     updated_user = user_updated.model_dump(exclude_unset=True)
     for key,value in updated_user.items():
         setattr(user,key,value)
-    db.commit()
-    db.refresh(user)
+    await db.commit()
+    await db.refresh(user)
     return user
 
 @router.patch("/picture",response_model=UserOutPrivate)
-async def upload_profile_picture(file:UploadFile,current_user : models.User = Depends(get_current_user),db : Session = Depends(get_db)):
+async def upload_profile_picture(db : Annotated[AsyncSession,Depends(get_db)],file:UploadFile,current_user : Annotated[ models.User ,Depends(get_current_user)]):
     content = await file.read()
 
     if len(content) > settings.MAX_UPLOAD_SIZE_BYTES:
@@ -117,8 +122,8 @@ async def upload_profile_picture(file:UploadFile,current_user : models.User = De
             detail=f"Invalid Image File.Please upload valid image(JPEG,PNG,GIF,Webp)") from err
     old_filename = current_user.image_file
     current_user.image_file = new_filename
-    db.commit()
-    db.refresh(current_user)
+    await db.commit()
+    await db.refresh(current_user)
 
     if old_filename:
         delete_profile_pic(old_filename)
@@ -126,10 +131,10 @@ async def upload_profile_picture(file:UploadFile,current_user : models.User = De
     return current_user
 
 @router.delete("/picture",response_model=UserOutPrivate)
-def delete_profile(current_user : models.User = Depends(get_current_user),db:Session = Depends(get_db)):
+async def delete_profile(db : Annotated[AsyncSession,Depends(get_db)],current_user : Annotated[ models.User ,Depends(get_current_user)]):
     old_pic = current_user.image_file
     current_user.image_file = "default.jpg"
     delete_profile_pic(old_pic)
-    db.commit()
-    db.refresh(current_user)
+    await db.commit()
+    await db.refresh(current_user)
     return current_user

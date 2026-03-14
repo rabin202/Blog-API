@@ -36,7 +36,7 @@ class UserOutPrivate(User):
     id : int 
     created_at : datetime
     role : UserRole
-    image_file : str
+    image_file : Optional[str] = None
 
 class UserUpdate(BaseModel):
     email : Optional[EmailStr] = None
@@ -63,7 +63,7 @@ class BlogOut(BlogBase):
     updated_at : datetime
     is_published : bool
     author : UserOut
-    comments : List[CommentOut]
+    comments: list[CommentOut]
 
     class Config:
         from_attributes=True
@@ -97,6 +97,18 @@ class PaginationBlogResponse(BaseModel):
     offset : int
     limit : int
     has_more : bool
+
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PaginationUserResponse(BaseModel):
+    users : list[UserOut]
+    total : int
+    offset : int
+    limit : int
+    has_more : bool
+
 
     model_config = ConfigDict(from_attributes=True)
 
